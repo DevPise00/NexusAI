@@ -1,0 +1,2 @@
+# NexusAI
+info about me
