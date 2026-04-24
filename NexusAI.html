@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexusAI – Think Smarter With AI</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    select option { background: #131a26; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+    textarea::placeholder, input::placeholder { color: #3d4a65; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback } = React;
+
+    // ── Built-in API call ──
+    async function callAI(messages, system = "", maxTokens = 1200) {
+      const body = { model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages };
+      if (system) body.system = system;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("API error " + res.status);
+      const d = await res.json();
+      return d.content[0].text;
+    }
+
+    // ── Palette & tokens ──
+    const C = {
+      bg: "#07090f", surf: "#0d1117", surf2: "#131a26", surf3: "#1a2335",
+      accent: "#4f8ef7", accent2: "#9b72f5", green: "#2dd4a0", amber: "#f59e0b",
+      text: "#dde2f0", text2: "#7c88a8", text3: "#3d4a65",
+      border: "rgba(255,255,255,0.06)", border2: "rgba(255,255,255,0.11)",
+    };
+
+    const s = {
+      shell: { display:"flex", height:"100vh", fontFamily:"'DM Sans',system-ui,sans-serif", background:C.bg, color:C.text, overflow:"hidden" },
+      sidebar: { width:220, flexShrink:0, background:C.surf, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", overflow:"hidden" },
+      main: { flex:1, display:"flex", flexDirection:"column", overflow:"hidden" },
+      topbar: { height:56, display:"flex", alignItems:"center", padding:"0 24px", gap:12, borderBottom:`1px solid ${C.border}`, background:"rgba(7,9,15,0.85)", backdropFilter:"blur(16px)", flexShrink:0 },
+      page: { flex:1, overflowY:"auto", display:"flex", flexDirection:"column" },
+    };
+
+    // ── Nav item ──
+    function NavItem({ icon, label, id, active, badge, onClick }) {
+      return (
+        <div onClick={onClick} style={{
+          display:"flex", alignItems:"center", gap:10, padding:"9px 14px",
+          borderRadius:8, cursor:"pointer", margin:"1px 8px", fontSize:13,
+          color: active ? C.text : C.text2,
+          background: active ? "rgba(79,142,247,0.12)" : "transparent",
+          border: active ? `1px solid rgba(79,142,247,0.2)` : "1px solid transparent",
+          transition:"all .18s",
+        }}>
+          <span style={{fontSize:15}}>{icon}</span>
+          <span style={{flex:1}}>{label}</span>
+          {badge && <span style={{fontSize:9, fontWeight:700, background:`linear-gradient(135deg,${C.accent},${C.accent2})`, color:"white", padding:"2px 7px", borderRadius:20}}>{badge}</span>}
+        </div>
+      );
+    }
+
+    // ── Btn ──
+    function Btn({ children, onClick, disabled, variant="primary", style:sx={} }) {
+      const base = { border:"none", borderRadius:9, padding:"10px 20px", fontSize:13, fontWeight:500, cursor: disabled?"not-allowed":"pointer", transition:"all .18s", opacity: disabled ? .45 : 1, fontFamily:"inherit" };
+      const variants = {
+        primary: { background:`linear-gradient(135deg,${C.accent},${C.accent2})`, color:"#fff", boxShadow:`0 4px 18px rgba(79,142,247,0.28)` },
+        ghost: { background:C.surf2, color:C.text, border:`1px solid ${C.border2}` },
+        green: { background:`linear-gradient(135deg,${C.green},rgba(45,212,160,0.7))`, color:"#032e1d", fontWeight:600 },
+      };
+      return <button onClick={disabled ? undefined : onClick} style={{...base,...variants[variant],...sx}}>{children}</button>;
+    }
+
+    // ── Textarea ──
+    function Textarea({ value, onChange, placeholder, rows=3, style:sx={}, onKeyDown }) {
+      const ref = useRef();
+      useEffect(() => {
+        if (ref.current) { ref.current.style.height="auto"; ref.current.style.height = Math.min(ref.current.scrollHeight,160)+"px"; }
+      }, [value]);
+      return (
+        <textarea ref={ref} value={value} onChange={onChange} onKeyDown={onKeyDown} placeholder={placeholder} rows={rows}
+          style={{ width:"100%", background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"11px 14px", fontSize:13, fontFamily:"inherit", resize:"none", outline:"none", lineHeight:1.65, boxSizing:"border-box", ...sx }}/>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // HOME
+    // ────────────────────────────────────────────────────────
+    function Home({ onNav }) {
+      const tools = [
+        { id:"chat", icon:"💬", name:"AI Chat", desc:"Ask anything — smart answers from Claude AI instantly.", col:"rgba(79,142,247,0.08)" },
+        { id:"analyzer", icon:"🔍", name:"Text Analyzer", desc:"Summarize, translate, fix grammar or detect sentiment.", col:"rgba(155,114,245,0.08)" },
+        { id:"code", icon:"⌨️", name:"Code Helper", desc:"Generate, explain, debug or convert code in any language.", col:"rgba(45,212,160,0.08)" },
+        { id:"creative", icon:"✍️", name:"Creative Writer", desc:"Write poems, stories, emails, slogans and more.", col:"rgba(245,158,11,0.08)" },
+        { id:"interview", icon:"🎤", name:"Interview Practice", desc:"Pick a domain, answer AI questions, get scored feedback.", col:"rgba(79,142,247,0.08)", badge:"NEW" },
+      ];
+      return (
+        <div style={{padding:"36px 32px"}}>
+          <div style={{textAlign:"center", marginBottom:40}}>
+            <div style={{display:"inline-flex", alignItems:"center", gap:8, background:"rgba(79,142,247,0.1)", border:`1px solid rgba(79,142,247,0.22)`, borderRadius:20, padding:"5px 16px", fontSize:12, color:C.accent, fontWeight:500, marginBottom:18}}>✦ No API key needed</div>
+            <h1 style={{fontSize:46, fontWeight:800, lineHeight:1.1, background:`linear-gradient(135deg,#fff 30%,${C.accent2} 65%,${C.accent})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", marginBottom:14}}>Think Smarter<br/>With AI</h1>
+            <p style={{color:C.text2, fontSize:16, maxWidth:440, margin:"0 auto 28px", lineHeight:1.7}}>Your all-in-one intelligent workspace — powered by Claude, right here with no setup.</p>
+            <div style={{display:"flex", gap:12, justifyContent:"center"}}>
+              <Btn onClick={()=>onNav("chat")}>Start Chatting →</Btn>
+              <Btn variant="ghost" onClick={()=>onNav("interview")}>🎤 Practice Interview</Btn>
+            </div>
+          </div>
+          <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))", gap:14}}>
+            {tools.map(t => (
+              <div key={t.id} onClick={()=>onNav(t.id)} style={{background:C.surf, border:`1px solid ${C.border}`, borderRadius:14, padding:22, cursor:"pointer", transition:"all .22s", position:"relative"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=C.border2; e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 28px rgba(0,0,0,0.28)";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border; e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+                {t.badge && <div style={{position:"absolute",top:14,right:14,background:`linear-gradient(135deg,${C.accent},${C.accent2})`,color:"white",fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:20}}>{t.badge}</div>}
+                <div style={{fontSize:26, marginBottom:10}}>{t.icon}</div>
+                <div style={{fontWeight:700, fontSize:15, marginBottom:5}}>{t.name}</div>
+                <div style={{fontSize:12, color:C.text2, lineHeight:1.55}}>{t.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // CHAT
+    // ────────────────────────────────────────────────────────
+    function Chat() {
+      const [msgs, setMsgs] = useState([{ role:"bot", text:"Hello! I'm your AI assistant powered by Claude. Ask me anything — questions, explanations, brainstorming, and more. 🚀" }]);
+      const [input, setInput] = useState("");
+      const [busy, setBusy] = useState(false);
+      const history = useRef([]);
+      const feedRef = useRef();
+      const suggestions = ["Explain machine learning simply","Write a motivational quote","Top 5 programming languages 2025","Fun fact about the universe"];
+
+      useEffect(() => { if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, [msgs]);
+
+      async function send(text) {
+        const t = (text || input).trim(); if (!t || busy) return;
+        setInput(""); setBusy(true);
+        history.current.push({ role:"user", content:t });
+        setMsgs(m => [...m, { role:"user", text:t }, { role:"typing" }]);
+        try {
+          const reply = await callAI(history.current, "You are a helpful, knowledgeable AI assistant. Give clear, well-structured answers.");
+          history.current.push({ role:"assistant", content:reply });
+          setMsgs(m => [...m.filter(x=>x.role!=="typing"), { role:"bot", text:reply }]);
+        } catch { setMsgs(m => [...m.filter(x=>x.role!=="typing"), { role:"bot", text:"Sorry, something went wrong. Please try again." }]); }
+        setBusy(false);
+      }
+
+      return (
+        <div style={{flex:1, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+          <div ref={feedRef} style={{flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:16}}>
+            {msgs.map((m,i) => (
+              <div key={i} style={{display:"flex", justifyContent: m.role==="user"?"flex-end":"flex-start"}}>
+                {m.role==="typing" ? (
+                  <div style={{background:C.surf2, border:`1px solid ${C.border}`, borderRadius:"14px 14px 14px 4px", padding:"14px 18px", display:"flex", gap:5}}>
+                    {[0,1,2].map(j=><div key={j} style={{width:7,height:7,borderRadius:"50%",background:C.accent,animation:`bounce 1.2s ${j*0.2}s infinite`}}/>)}
+                  </div>
+                ) : (
+                  <div style={{ maxWidth:"75%", padding:"13px 17px", borderRadius: m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+                    background: m.role==="user" ? `linear-gradient(135deg,${C.accent},rgba(79,142,247,0.8))` : C.surf2,
+                    border: m.role==="user" ? "none" : `1px solid ${C.border}`,
+                    color: m.role==="user" ? "#fff" : C.text, fontSize:14, lineHeight:1.7, whiteSpace:"pre-wrap" }}>
+                    {m.text}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"14px 24px", borderTop:`1px solid ${C.border}`, background:"rgba(7,9,15,0.9)"}}>
+            <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:10}}>
+              {suggestions.map(s=><div key={s} onClick={()=>send(s)} style={{background:C.surf2, border:`1px solid ${C.border2}`, borderRadius:20, padding:"5px 13px", fontSize:11, color:C.text2, cursor:"pointer"}}>{s}</div>)}
+            </div>
+            <div style={{display:"flex", gap:8}}>
+              <Textarea value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask me anything..." rows={1} style={{flex:1}}
+                onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}} />
+              <Btn onClick={()=>send()} disabled={busy} style={{padding:"10px 16px", flexShrink:0}}>➤</Btn>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // TEXT ANALYZER
+    // ────────────────────────────────────────────────────────
+    function Analyzer() {
+      const [input, setInput] = useState("");
+      const [result, setResult] = useState("");
+      const [mode, setMode] = useState("summarize");
+      const [busy, setBusy] = useState(false);
+      const modes = [
+        { id:"summarize", label:"📝 Summarize" }, { id:"sentiment", label:"❤️ Sentiment" },
+        { id:"grammar", label:"✅ Fix Grammar" }, { id:"translate", label:"🌐 Translate (Hindi)" },
+        { id:"keywords", label:"🏷️ Keywords" }, { id:"simplify", label:"💡 Simplify" },
+      ];
+      const prompts = {
+        summarize:"Summarize this text in 3-5 clear bullet points:",
+        sentiment:"Analyze the sentiment: overall tone, emotions, key phrases, and a confidence score:",
+        grammar:"Fix all grammar, spelling and punctuation errors. Return only the corrected text:",
+        translate:"Translate to Hindi. Provide Hindi + romanized version:",
+        keywords:"Extract the 10 most important keywords and briefly explain why each matters:",
+        simplify:"Rewrite in simple, easy-to-understand language anyone can read:",
+      };
+      async function analyze() {
+        if (!input.trim()) return;
+        setBusy(true); setResult("");
+        try { setResult(await callAI([{ role:"user", content: prompts[mode]+"\n\n"+input }])); }
+        catch { setResult("Error occurred. Please try again."); }
+        setBusy(false);
+      }
+      return (
+        <div style={{padding:24, flex:1, display:"flex", flexDirection:"column", gap:16, overflow:"auto"}}>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, flex:1, minHeight:0}}>
+            <div style={{background:C.surf, border:`1px solid ${C.border}`, borderRadius:14, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+              <div style={{padding:"14px 18px", borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:13}}>Input Text</div>
+              <div style={{flex:1, padding:14, display:"flex", flexDirection:"column", gap:10, overflow:"auto"}}>
+                <Textarea value={input} onChange={e=>setInput(e.target.value)} placeholder="Paste any text here to analyze..." rows={6} style={{flex:1, minHeight:180}} />
+                <div style={{fontSize:11, color:C.text3, textAlign:"right"}}>{input.length} chars</div>
+                <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
+                  {modes.map(m=>(
+                    <button key={m.id} onClick={()=>setMode(m.id)} style={{padding:"5px 12px", borderRadius:20, border:`1px solid ${mode===m.id?C.accent:C.border2}`, background: mode===m.id?"rgba(79,142,247,0.12)":"transparent", color: mode===m.id?C.accent:C.text2, fontSize:12, cursor:"pointer", fontFamily:"inherit"}}>{m.label}</button>
+                  ))}
+                </div>
+                <Btn onClick={analyze} disabled={busy} style={{width:"100%"}}>✦ {busy?"Analyzing...":"Analyze Now"}</Btn>
+              </div>
+            </div>
+            <div style={{background:C.surf, border:`1px solid ${C.border}`, borderRadius:14, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+              <div style={{padding:"14px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                <span style={{fontWeight:600, fontSize:13}}>AI Analysis</span>
+                {result && <button onClick={()=>navigator.clipboard.writeText(result)} style={{background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>Copy</button>}
+              </div>
+              <div style={{flex:1, padding:16, overflow:"auto", fontSize:13, lineHeight:1.8, color: result?C.text:C.text3, fontStyle: result?"normal":"italic", whiteSpace:"pre-wrap"}}>
+                {busy ? <div>Analyzing...</div> : result || "Your analysis results will appear here after clicking Analyze Now..."}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // CODE HELPER
+    // ────────────────────────────────────────────────────────
+    function CodeHelper() {
+      const [prompt, setPrompt] = useState("");
+      const [code, setCode] = useState("");
+      const [lang, setLang] = useState("Python");
+      const [action, setAction] = useState("generate");
+      const [result, setResult] = useState("");
+      const [busy, setBusy] = useState(false);
+      const langs = ["Python","JavaScript","HTML/CSS","Java","C++","SQL","React"];
+      const actions = [{ v:"generate", l:"Generate" },{ v:"explain", l:"Explain" },{ v:"debug", l:"Debug" },{ v:"optimize", l:"Optimize" },{ v:"convert", l:"Convert" }];
+
+      function stripFences(text) {
+        return text.replace(/```[\w]*\n?/g,"").replace(/```/g,"").trim();
+      }
+
+      async function run() {
+        if (!prompt && !code) return;
+        setBusy(true); setResult("");
+        const map = {
+          generate:`Generate ${lang} code for: ${prompt}. Add comments. Wrap in a markdown code block.`,
+          explain:`Explain this ${lang} code step by step:\n\n${code}\n\nContext: ${prompt}`,
+          debug:`Debug and fix this ${lang} code. Explain the issue. Show fixed code in a markdown block:\n\n${code}`,
+          optimize:`Optimize this ${lang} code. Explain improvements. Show optimized code in a markdown block:\n\n${code}`,
+          convert:`Convert this code to ${lang}. Wrap result in a markdown block:\n\n${code}\n\nTask: ${prompt}`,
+        };
+        try {
+          const raw = await callAI([{ role:"user", content:map[action] }], `You are an expert ${lang} programmer. Always wrap code in fenced markdown code blocks.`);
+          setResult(raw);
+        } catch { setResult("Error occurred. Please try again."); }
+        setBusy(false);
+      }
+
+      function renderCode(text) {
+        const cleaned = stripFences(text);
+        return <pre style={{margin:0, whiteSpace:"pre-wrap", wordBreak:"break-word", fontFamily:"'JetBrains Mono',monospace", fontSize:12.5, lineHeight:1.8, color:"#e6edf3"}}>{cleaned}</pre>;
+      }
+
+      const hasCode = result && result.includes("```");
+
+      return (
+        <div style={{padding:20, flex:1, display:"flex", flexDirection:"column", gap:14, overflow:"auto"}}>
+          <div style={{display:"flex", gap:12, alignItems:"flex-end", flexWrap:"wrap"}}>
+            <div style={{flex:1, minWidth:200}}>
+              <div style={{fontSize:11, color:C.text2, marginBottom:5, fontWeight:500}}>What do you want?</div>
+              <input value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="e.g. Login form with validation..." onKeyDown={e=>{if(e.key==="Enter")run();}}
+                style={{width:"100%", background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 13px", fontSize:13, fontFamily:"inherit", outline:"none", boxSizing:"border-box"}} />
+            </div>
+            <div>
+              <div style={{fontSize:11, color:C.text2, marginBottom:5, fontWeight:500}}>Language</div>
+              <select value={lang} onChange={e=>setLang(e.target.value)} style={{background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 12px", fontSize:13, fontFamily:"inherit", outline:"none"}}>
+                {langs.map(l=><option key={l}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:11, color:C.text2, marginBottom:5, fontWeight:500}}>Action</div>
+              <select value={action} onChange={e=>setAction(e.target.value)} style={{background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 12px", fontSize:13, fontFamily:"inherit", outline:"none"}}>
+                {actions.map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
+              </select>
+            </div>
+            <Btn variant="green" onClick={run} disabled={busy}>⚡ {busy?"Running...":"Run"}</Btn>
+          </div>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, flex:1, minHeight:300}}>
+            <div style={{background:"#0d1117", border:`1px solid ${C.border2}`, borderRadius:10, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+              <div style={{padding:"9px 14px", borderBottom:`1px solid rgba(255,255,255,0.06)`, fontSize:11, color:"#8b949e", fontFamily:"monospace"}}>YOUR CODE (optional)</div>
+              <textarea value={code} onChange={e=>setCode(e.target.value)} placeholder={`// Paste existing code here\n// Leave empty for Generate mode`}
+                style={{flex:1, background:"transparent", border:"none", color:"#e6edf3", padding:"14px 16px", fontSize:12.5, fontFamily:"'JetBrains Mono',monospace", resize:"none", outline:"none", lineHeight:1.8}} />
+            </div>
+            <div style={{background:"#0d1117", border:`1px solid ${C.border2}`, borderRadius:10, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+              <div style={{padding:"9px 14px", borderBottom:`1px solid rgba(255,255,255,0.06)`, fontSize:11, color:"#8b949e", fontFamily:"monospace", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                <span>AI OUTPUT</span>
+                {result && <span onClick={()=>navigator.clipboard.writeText(stripFences(result))} style={{cursor:"pointer", color:"#58a6ff"}}>Copy</span>}
+              </div>
+              <div style={{flex:1, overflowY:"auto", padding:14}}>
+                {busy ? <div style={{color:C.text3, fontFamily:"monospace", fontSize:12}}>Generating code...</div>
+                  : result ? (hasCode ? renderCode(result) : <pre style={{whiteSpace:"pre-wrap", fontSize:13, color:C.text, lineHeight:1.8, margin:0, fontFamily:"inherit"}}>{result}</pre>)
+                  : <div style={{color:C.text3, fontStyle:"italic", fontSize:13}}>Generated code will appear here...</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // CREATIVE WRITER
+    // ────────────────────────────────────────────────────────
+    function Creative() {
+      const [type, setType] = useState("poem");
+      const [prompt, setPrompt] = useState("");
+      const [tone, setTone] = useState("Creative & Poetic");
+      const [result, setResult] = useState("");
+      const [busy, setBusy] = useState(false);
+      const types = [
+        {id:"poem",icon:"🎭",label:"Poem / Poetry"},{id:"story",icon:"📖",label:"Short Story"},
+        {id:"email",icon:"📧",label:"Professional Email"},{id:"slogan",icon:"📢",label:"Slogan / Tagline"},
+        {id:"bio",icon:"🧑",label:"Professional Bio"},{id:"caption",icon:"📸",label:"Social Caption"},
+        {id:"essay",icon:"📝",label:"Essay Intro"},
+      ];
+      const tones = ["Professional","Casual & Friendly","Inspirational","Humorous","Emotional / Heartfelt","Formal","Creative & Poetic"];
+      const typePrompts = {
+        poem:"Write a beautiful, original poem", story:"Write an engaging short story (300 words)",
+        email:"Write a professional email", slogan:"Create 5 creative slogans/taglines",
+        bio:"Write a compelling professional bio (150 words)", caption:"Write 5 social media captions with hashtags",
+        essay:"Write a compelling essay introduction (150 words)",
+      };
+      async function generate() {
+        if (!prompt.trim()) return;
+        setBusy(true); setResult("");
+        try { setResult(await callAI([{ role:"user", content:`${typePrompts[type]} about "${prompt}" in a ${tone} tone.` }], "You are a talented creative writer. Produce high-quality, original, memorable content.")); }
+        catch { setResult("Error occurred. Please try again."); }
+        setBusy(false);
+      }
+      return (
+        <div style={{padding:20, flex:1, display:"flex", gap:16, overflow:"auto", minHeight:0}}>
+          <div style={{width:260, flexShrink:0, display:"flex", flexDirection:"column", gap:12}}>
+            <div style={{fontSize:11, color:C.text2, fontWeight:600, letterSpacing:"0.08em", textTransform:"uppercase"}}>Content Type</div>
+            {types.map(t=>(
+              <button key={t.id} onClick={()=>setType(t.id)} style={{display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background: type===t.id?"rgba(155,114,245,0.1)":C.surf2, border: `1px solid ${type===t.id?C.accent2:C.border}`, borderRadius:8, color: type===t.id?C.text:C.text2, fontSize:13, cursor:"pointer", fontFamily:"inherit", textAlign:"left"}}>
+                <span>{t.icon}</span><span>{t.label}</span>
+              </button>
+            ))}
+            <div style={{marginTop:4}}>
+              <div style={{fontSize:11, color:C.text2, fontWeight:600, marginBottom:6}}>Your Prompt</div>
+              <Textarea value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="Topic, style, subject..." rows={3} />
+            </div>
+            <div>
+              <div style={{fontSize:11, color:C.text2, fontWeight:600, marginBottom:6}}>Tone</div>
+              <select value={tone} onChange={e=>setTone(e.target.value)} style={{width:"100%", background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 12px", fontSize:13, fontFamily:"inherit", outline:"none"}}>
+                {tones.map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <Btn onClick={generate} disabled={busy} style={{width:"100%"}}>✦ {busy?"Writing...":"Generate"}</Btn>
+          </div>
+          <div style={{flex:1, background:C.surf, border:`1px solid ${C.border}`, borderRadius:14, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+            <div style={{padding:"14px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+              <span style={{fontWeight:600, fontSize:13}}>Generated Content</span>
+              {result && <div style={{display:"flex", gap:8}}>
+                <button onClick={()=>navigator.clipboard.writeText(result)} style={{background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>📋 Copy</button>
+                <button onClick={generate} style={{background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>🔄 Redo</button>
+              </div>}
+            </div>
+            <div style={{flex:1, padding:24, overflowY:"auto", fontSize:15, lineHeight:1.9, whiteSpace:"pre-wrap", color: result?C.text:C.text3, fontStyle: result?"normal":"italic"}}>
+              {busy ? "Writing your content..." : result || "Select a type, enter your prompt, and click Generate!"}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // INTERVIEW PRACTICE
+    // ────────────────────────────────────────────────────────
+    const DOMAINS = [
+      {id:"Software Engineering",icon:"💻"},{id:"Data Science & ML",icon:"📊"},
+      {id:"Web Development",icon:"🌐"},{id:"Product Management",icon:"📋"},
+      {id:"Cybersecurity",icon:"🔐"},{id:"UI/UX Design",icon:"🎨"},
+      {id:"DevOps & Cloud",icon:"☁️"},{id:"Database & SQL",icon:"🗄️"},
+      {id:"Business Analyst",icon:"📈"},
+    ];
+
+    function Interview() {
+      const [phase, setPhase] = useState("setup");
+      const [domain, setDomain] = useState(null);
+      const [level, setLevel] = useState("Mid-Level");
+      const [total, setTotal] = useState(5);
+      const [feed, setFeed] = useState([]);
+      const [answer, setAnswer] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [current, setCurrent] = useState(0);
+      const [scores, setScores] = useState([]);
+      const [questions, setQuestions] = useState([]);
+      const histRef = useRef([]);
+      const feedRef = useRef();
+      const currentRef = useRef(0);
+      const questionsRef = useRef([]);
+
+      useEffect(() => { if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, [feed]);
+
+      function addFeed(item) { setFeed(f => [...f, item]); }
+
+      async function startInterview() {
+        if (!domain) return;
+        histRef.current = []; currentRef.current = 0; questionsRef.current = [];
+        setFeed([]); setScores([]); setQuestions([]); setCurrent(0);
+        setPhase("session");
+        await askQuestion(0, domain, level, total, histRef.current, questionsRef.current);
+      }
+
+      async function askQuestion(qIdx, dom, lvl, tot, hist, qs) {
+        setBusy(true);
+        addFeed({ type:"typing" });
+        const sys = `You are a senior ${dom} interviewer. Candidate level: ${lvl}. Session: ${tot} questions total. This is question ${qIdx+1}.
+Rules: Ask ONE specific relevant question. Vary types: technical, conceptual, behavioral. Never repeat. No preamble. Just the question directly. Do NOT number it.`;
+        try {
+          const q = await callAI([...hist, { role:"user", content:`Ask interview question ${qIdx+1}` }], sys);
+          hist.push({ role:"user", content:`Ask interview question ${qIdx+1}` });
+          hist.push({ role:"assistant", content:q });
+          qs.push(q);
+          setQuestions([...qs]);
+          setFeed(f => [...f.filter(x=>x.type!=="typing"), { type:"question", text:q, num:qIdx+1, total:tot }]);
+        } catch { setFeed(f => [...f.filter(x=>x.type!=="typing"), { type:"question", text:"Error loading question. Please try again.", num:qIdx+1, total:tot }]); }
+        setBusy(false);
+      }
+
+      async function submitAnswer() {
+        const ans = answer.trim(); if (!ans || busy) return;
+        setAnswer("");
+        const qIdx = currentRef.current;
+        addFeed({ type:"answer", text:ans });
+        setBusy(true);
+        addFeed({ type:"typing" });
+        const feedbackPrompt = `You asked: "${questionsRef.current[qIdx]}"\nCandidate answered: "${ans}"\n\nGive feedback:\n1. Correctness (1 line)\n2. What was good\n3. What was missing\n4. Ideal answer (2-3 sentences)\n5. Score: X/10\n\nBe constructive. Under 150 words.`;
+        histRef.current.push({ role:"user", content:feedbackPrompt });
+        try {
+          const fb = await callAI(histRef.current, `You are a senior ${domain} interviewer giving constructive feedback.`);
+          histRef.current.push({ role:"assistant", content:fb });
+          const scoreMatch = fb.match(/(\d+)\s*\/\s*10/);
+          const score = scoreMatch ? parseInt(scoreMatch[1]) : null;
+          if (score !== null) setScores(s => [...s, score]);
+          setFeed(f => [...f.filter(x=>x.type!=="typing"), { type:"feedback", text:fb, score }]);
+        } catch { setFeed(f => [...f.filter(x=>x.type!=="typing"), { type:"feedback", text:"Could not load feedback.", score:null }]); }
+        const next = qIdx + 1;
+        currentRef.current = next;
+        setCurrent(next);
+        if (next >= total) {
+          setBusy(false);
+          setTimeout(() => setPhase("done"), 400);
+        } else {
+          await askQuestion(next, domain, level, total, histRef.current, questionsRef.current);
+        }
+      }
+
+      // ── SETUP SCREEN ──
+      if (phase === "setup") return (
+        <div style={{flex:1, overflowY:"auto", padding:"32px 24px", display:"flex", flexDirection:"column", alignItems:"center"}}>
+          <div style={{textAlign:"center", marginBottom:28}}>
+            <div style={{fontSize:44, marginBottom:10}}>🎤</div>
+            <h2 style={{fontWeight:800, fontSize:24, marginBottom:8}}>Interview Practice</h2>
+            <p style={{color:C.text2, fontSize:14, maxWidth:420, lineHeight:1.65}}>Pick a domain and experience level. AI will ask real interview questions one by one and give detailed scored feedback.</p>
+          </div>
+          <div style={{width:"100%", maxWidth:580, display:"flex", flexDirection:"column", gap:20}}>
+            <div>
+              <div style={{fontSize:11, color:C.text3, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10}}>Select Domain</div>
+              <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:9}}>
+                {DOMAINS.map(d=>(
+                  <div key={d.id} onClick={()=>setDomain(d.id)} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:7, padding:"14px 8px", borderRadius:12, border:`1.5px solid ${domain===d.id?C.accent2:C.border}`, background: domain===d.id?"rgba(155,114,245,0.1)":C.surf, cursor:"pointer", transition:"all .18s", color: domain===d.id?C.text:C.text2, fontSize:12, fontWeight:500, textAlign:"center"}}>
+                    <span style={{fontSize:22}}>{d.icon}</span><span>{d.id}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14}}>
+              <div>
+                <div style={{fontSize:11, color:C.text2, fontWeight:600, marginBottom:6}}>Experience Level</div>
+                <select value={level} onChange={e=>setLevel(e.target.value)} style={{width:"100%", background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 12px", fontSize:13, fontFamily:"inherit", outline:"none"}}>
+                  <option value="Fresher">🌱 Fresher (0–1 yr)</option>
+                  <option value="Junior">🚀 Junior (1–3 yrs)</option>
+                  <option value="Mid-Level">⭐ Mid-Level (3–6 yrs)</option>
+                  <option value="Senior">🏆 Senior (6+ yrs)</option>
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:11, color:C.text2, fontWeight:600, marginBottom:6}}>No. of Questions</div>
+                <select value={total} onChange={e=>setTotal(+e.target.value)} style={{width:"100%", background:C.surf2, border:`1px solid ${C.border2}`, color:C.text, borderRadius:8, padding:"9px 12px", fontSize:13, fontFamily:"inherit", outline:"none"}}>
+                  <option value={3}>3 Questions (Quick)</option>
+                  <option value={5}>5 Questions (Standard)</option>
+                  <option value={8}>8 Questions (Full)</option>
+                  <option value={10}>10 Questions (Intensive)</option>
+                </select>
+              </div>
+            </div>
+            {!domain && <div style={{color:C.amber, fontSize:12, textAlign:"center"}}>⚠ Please select a domain above</div>}
+            <Btn onClick={startInterview} disabled={!domain} style={{width:"100%", padding:"13px", fontSize:15}}>🎤 Start Interview</Btn>
+          </div>
+        </div>
+      );
+
+      // ── SESSION / DONE SCREEN ──
+      const domainObj = DOMAINS.find(d=>d.id===domain)||{icon:"🎤"};
+      const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : null;
+
+      return (
+        <div style={{flex:1, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+          <div style={{padding:"12px 24px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:14, background:"rgba(7,9,15,0.9)", flexShrink:0}}>
+            <div style={{width:38, height:38, borderRadius:10, background:`linear-gradient(135deg,${C.accent2},${C.accent})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>{domainObj.icon}</div>
+            <div>
+              <div style={{fontWeight:700, fontSize:14}}>{domain}</div>
+              <div style={{fontSize:11, color:C.text3}}>{level} Level</div>
+            </div>
+            <div style={{marginLeft:"auto", display:"flex", alignItems:"center", gap:14}}>
+              <div style={{display:"flex", gap:6}}>
+                {Array.from({length:total}).map((_,i)=>(
+                  <div key={i} style={{width:10, height:10, borderRadius:"50%", transition:"all .3s",
+                    background: i < current ? C.green : i === current && phase==="session" ? C.accent : C.border2,
+                    boxShadow: i < current ? `0 0 6px ${C.green}` : i===current&&phase==="session" ? `0 0 8px ${C.accent}` : "none"}}/>
+                ))}
+              </div>
+              <div style={{background:"rgba(79,142,247,0.12)", border:`1px solid rgba(79,142,247,0.25)`, borderRadius:20, padding:"4px 14px", fontSize:12, fontWeight:600, color:C.accent}}>
+                {phase==="done" ? "Done!" : `Q ${Math.min(current+1,total)} / ${total}`}
+              </div>
+              <button onClick={()=>{setPhase("setup");setFeed([]);}} style={{background:"transparent", border:`1px solid ${C.border2}`, color:C.text3, borderRadius:8, padding:"5px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>✕ End</button>
+            </div>
+          </div>
+
+          <div ref={feedRef} style={{flex:1, overflowY:"auto", padding:"24px 28px", display:"flex", flexDirection:"column", gap:18}}>
+            {feed.map((item, i) => {
+              if (item.type==="typing") return (
+                <div key={i} style={{background:C.surf2, border:`1px solid ${C.border}`, borderRadius:"14px 14px 14px 4px", padding:"14px 18px", display:"flex", gap:5, maxWidth:180}}>
+                  {[0,1,2].map(j=><div key={j} style={{width:7,height:7,borderRadius:"50%",background:C.accent,animation:`bounce 1.2s ${j*0.2}s infinite`}}/>)}
+                </div>
+              );
+              if (item.type==="question") return (
+                <div key={i}>
+                  <div style={{fontSize:11, color:C.accent, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:7}}>🤖 Question {item.num} of {item.total}</div>
+                  <div style={{background:`linear-gradient(135deg,rgba(79,142,247,0.1),rgba(155,114,245,0.07))`, border:`1px solid rgba(79,142,247,0.18)`, borderRadius:"14px 14px 14px 4px", padding:"16px 20px", maxWidth:"78%", fontSize:15, lineHeight:1.75, whiteSpace:"pre-wrap"}}>{item.text}</div>
+                </div>
+              );
+              if (item.type==="answer") return (
+                <div key={i} style={{display:"flex", justifyContent:"flex-end"}}>
+                  <div>
+                    <div style={{fontSize:11, color:C.text3, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:7, textAlign:"right"}}>👤 Your Answer</div>
+                    <div style={{background:C.surf2, border:`1px solid ${C.border2}`, borderRadius:"14px 14px 4px 14px", padding:"14px 18px", maxWidth:"78%", fontSize:14, lineHeight:1.7, whiteSpace:"pre-wrap"}}>{item.text}</div>
+                  </div>
+                </div>
+              );
+              if (item.type==="feedback") {
+                const sc = item.score; const col = sc>=8?C.green:sc>=5?C.amber:"#f87171"; const em = sc>=8?"🟢":sc>=5?"🟡":"🔴";
+                return (
+                  <div key={i}>
+                    <div style={{fontSize:11, color:C.green, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:7}}>✦ AI Feedback</div>
+                    <div style={{background:"rgba(45,212,160,0.05)", border:`1px solid rgba(45,212,160,0.15)`, borderRadius:14, padding:"16px 20px", maxWidth:"78%", fontSize:13, lineHeight:1.8, whiteSpace:"pre-wrap"}}>
+                      {item.text}
+                      {sc!=null && <div style={{display:"inline-flex", alignItems:"center", gap:6, background:`${col}18`, border:`1px solid ${col}40`, borderRadius:20, padding:"3px 12px", fontSize:12, fontWeight:700, color:col, marginTop:10}}>{em} Score: {sc} / 10</div>}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
+
+            {phase==="done" && (
+              <div style={{background:`linear-gradient(135deg,rgba(79,142,247,0.09),rgba(155,114,245,0.07))`, border:`1px solid rgba(79,142,247,0.2)`, borderRadius:16, padding:24, marginTop:8}}>
+                <div style={{fontWeight:800, fontSize:18, marginBottom:16}}>📊 Session Summary</div>
+                <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16}}>
+                  {[{n:total,l:"Questions"},{n:scores.length,l:"Scored"},{n:avg?`${avg}/10`:"—",l:"Avg Score"}].map((s,i)=>(
+                    <div key={i} style={{background:C.surf2, borderRadius:10, padding:"14px", textAlign:"center"}}>
+                      <div style={{fontSize:24, fontWeight:800, color:i===2&&avg?(avg>=8?C.green:avg>=5?C.amber:"#f87171"):C.accent}}>{s.n}</div>
+                      <div style={{fontSize:11, color:C.text3, marginTop:4}}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:13, color:C.text2, lineHeight:1.7, marginBottom:16}}>
+                  <strong style={{color:C.text}}>Domain:</strong> {domain} · <strong style={{color:C.text}}>Level:</strong> {level} · {avg>=8?"🎉 Excellent!":avg>=6?"👍 Good effort!":avg>=4?"📚 Keep practicing!":"💪 Keep learning!"}
+                </div>
+                <Btn onClick={()=>{setPhase("setup");setFeed([]);setCurrent(0);setScores([]);}}>🔄 Practice Again</Btn>
+              </div>
+            )}
+          </div>
+
+          {phase==="session" && (
+            <div style={{padding:"14px 24px", borderTop:`1px solid ${C.border}`, background:"rgba(7,9,15,0.92)", flexShrink:0}}>
+              <div style={{fontSize:11, color:C.text3, marginBottom:8}}>💡 Type your answer and press Enter to submit.</div>
+              <div style={{display:"flex", gap:10}}>
+                <Textarea value={answer} onChange={e=>setAnswer(e.target.value)} placeholder="Type your answer here..." rows={2} style={{flex:1}}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submitAnswer();}}} />
+                <Btn onClick={submitAnswer} disabled={busy||!answer.trim()} style={{flexShrink:0, padding:"10px 16px"}}>➤</Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ────────────────────────────────────────────────────────
+    // ROOT APP
+    // ────────────────────────────────────────────────────────
+    const PAGES = {
+      home:      { label:"Home",              icon:"⬡",  title:"Welcome Back",          sub:"Choose a tool to get started" },
+      chat:      { label:"AI Chat",           icon:"💬", title:"AI Chat",               sub:"Ask me anything" },
+      analyzer:  { label:"Text Analyzer",     icon:"🔍", title:"Text Analyzer",         sub:"Summarize, translate & analyze any text" },
+      code:      { label:"Code Helper",       icon:"⌨️", title:"Code Helper",           sub:"Generate, debug & explain code" },
+      creative:  { label:"Creative Writer",   icon:"✍️", title:"Creative Writer",       sub:"Write anything with AI assistance" },
+      interview: { label:"Interview Practice",icon:"🎤", title:"Interview Practice",    sub:"Practice real interviews with AI feedback", badge:"NEW" },
+    };
+
+    function App() {
+      const [page, setPage] = useState("home");
+      const pg = PAGES[page];
+
+      return (
+        <div style={s.shell}>
+          <aside style={s.sidebar}>
+            <div style={{padding:"22px 16px 16px", borderBottom:`1px solid ${C.border}`}}>
+              <div style={{display:"flex", alignItems:"center", gap:10}}>
+                <div style={{width:34, height:34, borderRadius:9, background:`linear-gradient(135deg,${C.accent},${C.accent2})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0}}>✦</div>
+                <div>
+                  <div style={{fontWeight:800, fontSize:17, background:`linear-gradient(135deg,#fff,${C.accent2})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent"}}>NexusAI</div>
+                  <div style={{fontSize:10, color:C.text3, marginTop:1}}>No API key needed</div>
+                </div>
+              </div>
+            </div>
+            <nav style={{flex:1, padding:"12px 4px", overflowY:"auto"}}>
+              <div style={{fontSize:9, fontWeight:700, color:C.text3, letterSpacing:"0.1em", textTransform:"uppercase", padding:"8px 16px 4px"}}>Main</div>
+              <NavItem id="home" icon="⬡" label="Home" active={page==="home"} onClick={()=>setPage("home")} />
+              <div style={{fontSize:9, fontWeight:700, color:C.text3, letterSpacing:"0.1em", textTransform:"uppercase", padding:"12px 16px 4px"}}>AI Tools</div>
+              {Object.entries(PAGES).filter(([k])=>k!=="home").map(([k,v])=>(
+                <NavItem key={k} id={k} icon={v.icon} label={v.label} badge={v.badge} active={page===k} onClick={()=>setPage(k)} />
+              ))}
+            </nav>
+            <div style={{padding:14, borderTop:`1px solid ${C.border}`}}>
+              <div style={{background:`rgba(45,212,160,0.08)`, border:`1px solid rgba(45,212,160,0.18)`, borderRadius:9, padding:"10px 12px", display:"flex", alignItems:"center", gap:8}}>
+                <div style={{width:7, height:7, borderRadius:"50%", background:C.green, boxShadow:`0 0 7px ${C.green}`, flexShrink:0}}/>
+                <div style={{fontSize:11, color:C.green, fontWeight:500}}>AI Online · No setup needed</div>
+              </div>
+            </div>
+          </aside>
+
+          <main style={s.main}>
+            <div style={s.topbar}>
+              <div>
+                <div style={{fontWeight:700, fontSize:16}}>{pg.title}</div>
+                <div style={{fontSize:11, color:C.text3}}>{pg.sub}</div>
+              </div>
+            </div>
+            <div style={{flex:1, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+              {page==="home"      && <div style={{overflowY:"auto",flex:1}}><Home onNav={setPage}/></div>}
+              {page==="chat"      && <Chat/>}
+              {page==="analyzer"  && <Analyzer/>}
+              {page==="code"      && <CodeHelper/>}
+              {page==="creative"  && <Creative/>}
+              {page==="interview" && <Interview/>}
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
